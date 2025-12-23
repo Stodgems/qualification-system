@@ -1,6 +1,4 @@
-# Qualification System for Garry's Mod
-
-A complete qualification management system for Garry's Mod servers. Allows admins to create qualifications with custom properties and assign them to players.
+# Qualification System
 
 ## Features
 
