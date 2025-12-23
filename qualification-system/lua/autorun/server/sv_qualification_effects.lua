@@ -1,0 +1,202 @@
+-- Server-side qualification effects application
+
+-- Apply qualification effects to a player
+function QualSystem:ApplyQualificationEffects(ply, qualName)
+    if not IsValid(ply) then return end
+    if not self.Qualifications[qualName] then return end
+    
+    local qualData = self.Qualifications[qualName]
+    
+    -- Check if player's job is allowed for this qualification
+    if not self:IsPlayerJobAllowed(ply, qualData) then
+        return -- Don't apply effects if job isn't allowed
+    end
+    
+    -- Apply health
+    if qualData.health and qualData.health > 0 then
+        ply:SetHealth(qualData.health)
+        ply:SetMaxHealth(qualData.health)
+    end
+    
+    -- Apply armor
+    if qualData.armor and qualData.armor > 0 then
+        ply:SetArmor(qualData.armor)
+    end
+    
+    -- Apply model
+    if qualData.model and qualData.model ~= "" then
+        ply:SetModel(qualData.model)
+    end
+    
+    -- Give weapons
+    if qualData.weapons and #qualData.weapons > 0 then
+        for _, weapon in ipairs(qualData.weapons) do
+            if weapon ~= "" then
+                ply:Give(weapon)
+            end
+        end
+    end
+    
+    -- Execute custom function
+    if qualData.custom_function and qualData.custom_function ~= "" then
+        local func, err = CompileString(qualData.custom_function, "QualificationCustomFunction_" .. qualName)
+        if func then
+            local success, error = pcall(func, ply, qualData)
+            if not success then
+                print("[Qualification System] Error executing custom function for " .. qualName .. ": " .. tostring(error))
+            end
+        else
+            print("[Qualification System] Error compiling custom function for " .. qualName .. ": " .. tostring(err))
+        end
+    end
+end
+
+-- Chat command handler
+hook.Add("PlayerSay", "QualSystem_ChatCommands", function(ply, text)
+    if text == QualSystem.Config.AdminCommand then
+        if QualSystem:IsAdmin(ply) then
+            net.Start("QualSystem_OpenAdminMenu")
+            net.Send(ply)
+        else
+            ply:ChatPrint("[Qualification System] You don't have permission to use this command!")
+        end
+        return ""
+    end
+    
+    if text == "!quals" then
+        net.Start("QualSystem_OpenContextMenu")
+        net.WriteEntity(ply)
+        net.Send(ply)
+        return ""
+    end
+end)
+
+-- Network receivers
+net.Receive("QualSystem_CreateQualification", function(len, ply)
+    if not QualSystem:IsAdmin(ply) then return end
+    
+    local data = net.ReadTable()
+    if QualSystem:CreateQualification(data) then
+        ply:ChatPrint("[Qualification System] Qualification created successfully!")
+    else
+        ply:ChatPrint("[Qualification System] Failed to create qualification!")
+    end
+end)
+
+net.Receive("QualSystem_UpdateQualification", function(len, ply)
+    if not QualSystem:IsAdmin(ply) then return end
+    
+    local data = net.ReadTable()
+    if QualSystem:UpdateQualification(data) then
+        ply:ChatPrint("[Qualification System] Qualification updated successfully!")
+    else
+        ply:ChatPrint("[Qualification System] Failed to update qualification!")
+    end
+end)
+
+net.Receive("QualSystem_DeleteQualification", function(len, ply)
+    if not QualSystem:IsAdmin(ply) then return end
+    
+    local qualName = net.ReadString()
+    QualSystem:DeleteQualification(qualName)
+    ply:ChatPrint("[Qualification System] Qualification deleted successfully!")
+end)
+
+net.Receive("QualSystem_AddPlayerQual", function(len, ply)
+    local targetSteamID = net.ReadString()
+    local qualName = net.ReadString()
+    
+    local target = player.GetBySteamID(targetSteamID)
+    if not IsValid(target) then 
+        ply:ChatPrint("[Qualification System] Target player not found!")
+        return 
+    end
+    
+    local qualData = QualSystem.Qualifications[qualName]
+    if not qualData then
+        ply:ChatPrint("[Qualification System] Invalid qualification!")
+        return
+    end
+    
+    -- Check permissions
+    if not QualSystem:CanManageQualification(ply, qualData) then
+        ply:ChatPrint("[Qualification System] You don't have permission to assign this qualification!")
+        return
+    end
+    
+    -- Check job restrictions
+    if not QualSystem:IsPlayerJobAllowed(target, qualData) then
+        local jobsList = table.concat(qualData.allowed_jobs, ", ")
+        ply:ChatPrint(string.format("[Qualification System] %s's job is not allowed for this qualification! Allowed jobs: %s", target:Nick(), jobsList))
+        return
+    end
+    
+    if QualSystem:AddPlayerQualification(target, qualName, ply:Nick()) then
+        ply:ChatPrint(string.format("[Qualification System] Added '%s' to %s", qualData.display_name, target:Nick()))
+        target:ChatPrint(string.format("[Qualification System] You have been granted the '%s' qualification!", qualData.display_name))
+    else
+        ply:ChatPrint("[Qualification System] Failed to add qualification!")
+    end
+end)
+
+net.Receive("QualSystem_RemovePlayerQual", function(len, ply)
+    local targetSteamID = net.ReadString()
+    local qualName = net.ReadString()
+    
+    local target = player.GetBySteamID(targetSteamID)
+    if not IsValid(target) then 
+        ply:ChatPrint("[Qualification System] Target player not found!")
+        return 
+    end
+    
+    local qualData = QualSystem.Qualifications[qualName]
+    if not qualData then
+        ply:ChatPrint("[Qualification System] Invalid qualification!")
+        return
+    end
+    
+    -- Check permissions
+    if not QualSystem:CanManageQualification(ply, qualData) then
+        ply:ChatPrint("[Qualification System] You don't have permission to remove this qualification!")
+        return
+    end
+    
+    if QualSystem:RemovePlayerQualification(target, qualName) then
+        ply:ChatPrint(string.format("[Qualification System] Removed '%s' from %s", qualData.display_name, target:Nick()))
+        target:ChatPrint(string.format("[Qualification System] Your '%s' qualification has been removed.", qualData.display_name))
+    else
+        ply:ChatPrint("[Qualification System] Failed to remove qualification!")
+    end
+end)
+
+net.Receive("QualSystem_RequestPlayerQuals", function(len, ply)
+    local targetSteamID = net.ReadString()
+    local target = player.GetBySteamID(targetSteamID)
+    
+    if not IsValid(target) then return end
+    
+    local quals = QualSystem:GetPlayerQualifications(target)
+    
+    net.Start("QualSystem_SendPlayerQuals")
+    net.WriteString(targetSteamID)
+    net.WriteTable(quals)
+    net.Send(ply)
+end)
+
+-- Reapply qualifications when player changes job
+hook.Add("OnPlayerChangedTeam", "QualSystem_JobChange", function(ply, oldTeam, newTeam)
+    if not IsValid(ply) then return end
+    
+    -- Small delay to ensure job change is complete
+    timer.Simple(0.1, function()
+        if not IsValid(ply) then return end
+        
+        -- Reapply all player's qualifications
+        local quals = QualSystem:GetPlayerQualifications(ply)
+        for _, qual in ipairs(quals) do
+            QualSystem:ApplyQualificationEffects(ply, qual.qualification_name)
+        end
+    end)
+end)
+
+print("[Qualification System] Server-side effects loaded!")
