@@ -26,6 +26,26 @@ function QualSystem:ApplyQualificationEffects(ply, qualName)
     -- Apply model
     if qualData.model and qualData.model ~= "" then
         ply:SetModel(qualData.model)
+        
+        -- Apply skin and bodygroups after a small delay to ensure model is loaded
+        timer.Simple(0.1, function()
+            if not IsValid(ply) then return end
+            
+            -- Apply skin
+            if qualData.skin and qualData.skin > 0 then
+                ply:SetSkin(qualData.skin)
+            end
+            
+            -- Apply bodygroups
+            if qualData.bodygroups and table.Count(qualData.bodygroups) > 0 then
+                for bgName, bgValue in pairs(qualData.bodygroups) do
+                    local bgIndex = ply:FindBodygroupByName(bgName)
+                    if bgIndex ~= -1 then
+                        ply:SetBodygroup(bgIndex, bgValue)
+                    end
+                end
+            end
+        end)
     end
     
     -- Give weapons

@@ -139,6 +139,28 @@ function QualSystem:OpenAdminMenu()
         modelLabel:SizeToContents()
         y = y + 25
         
+        -- Skin
+        if qualData.skin and qualData.skin > 0 then
+            local skinLabel = vgui.Create("DLabel", detailsPanel)
+            skinLabel:SetPos(10, y)
+            skinLabel:SetText("Skin: " .. qualData.skin)
+            skinLabel:SizeToContents()
+            y = y + 25
+        end
+        
+        -- Bodygroups
+        if qualData.bodygroups and table.Count(qualData.bodygroups) > 0 then
+            local bodygroupsLabel = vgui.Create("DLabel", detailsPanel)
+            bodygroupsLabel:SetPos(10, y)
+            local bgText = "Bodygroups: "
+            for bgName, bgValue in pairs(qualData.bodygroups) do
+                bgText = bgText .. bgName .. "=" .. bgValue .. " "
+            end
+            bodygroupsLabel:SetText(bgText)
+            bodygroupsLabel:SizeToContents()
+            y = y + 25
+        end
+        
         -- Health
         local healthLabel = vgui.Create("DLabel", detailsPanel)
         healthLabel:SetPos(10, y)
@@ -322,7 +344,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     -- Create editor frame
     local frame = vgui.Create("DFrame")
-    frame:SetSize(600, 700)
+    frame:SetSize(900, 700)
     frame:Center()
     frame:SetTitle("")
     frame:SetVisible(true)
@@ -360,9 +382,184 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
         frame:Close()
     end
     
-    local scroll = vgui.Create("DScrollPanel", frame)
+    -- Create left and right panels
+    local leftPanel = vgui.Create("DPanel", frame)
+    leftPanel:Dock(LEFT)
+    leftPanel:SetWide(550)
+    leftPanel:DockMargin(10, 50, 5, 10)
+    leftPanel.Paint = function(self, w, h) end
+    
+    local scroll = vgui.Create("DScrollPanel", leftPanel)
     scroll:Dock(FILL)
-    scroll:DockMargin(10, 50, 10, 10)
+    
+    -- Create right panel for model preview
+    local rightPanel = vgui.Create("DPanel", frame)
+    rightPanel:Dock(FILL)
+    rightPanel:DockMargin(5, 50, 10, 10)
+    rightPanel.Paint = function(self, w, h)
+        draw.RoundedBox(6, 0, 0, w, h, Color(35, 35, 40, 220))
+        surface.SetDrawColor(50, 50, 60, 100)
+        surface.DrawOutlinedRect(0, 0, w, h)
+    end
+    
+    -- Model preview header panel
+    local previewHeader = vgui.Create("DPanel", rightPanel)
+    previewHeader:Dock(TOP)
+    previewHeader:SetTall(30)
+    previewHeader:DockMargin(5, 5, 5, 0)
+    previewHeader.Paint = function(self, w, h) end
+    
+    -- Model preview label
+    local previewLabel = vgui.Create("DLabel", previewHeader)
+    previewLabel:Dock(LEFT)
+    previewLabel:SetText("Model Preview (drag to rotate)")
+    previewLabel:SetFont("DermaDefaultBold")
+    previewLabel:SetTextColor(Color(200, 220, 255, 255))
+    previewLabel:SetContentAlignment(4)
+    previewLabel:DockMargin(0, 0, 5, 0)
+    previewLabel:SizeToContents()
+    
+    -- Reset rotation button
+    local resetBtn = vgui.Create("DButton", previewHeader)
+    resetBtn:Dock(RIGHT)
+    resetBtn:SetWide(80)
+    resetBtn:SetText("")
+    resetBtn.Paint = function(self, w, h)
+        local col = Color(50, 100, 150, 200)
+        if self:IsHovered() then
+            col = Color(60, 120, 170, 255)
+        end
+        draw.RoundedBox(4, 0, 0, w, h, col)
+        draw.SimpleText("Reset View", "DermaDefault", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+    end
+    
+    -- Model viewer
+    local modelViewer = vgui.Create("DModelPanel", rightPanel)
+    modelViewer:Dock(FILL)
+    modelViewer:DockMargin(5, 0, 5, 5)
+    
+    -- Enable mouse rotation
+    local rotationYaw = 180  -- Start at 180 so model faces forward
+    local rotationPitch = 0
+    local isDragging = false
+    local lastMouseX = 0
+    local lastMouseY = 0
+    
+    function modelViewer:DragMousePress()
+        isDragging = true
+        lastMouseX, lastMouseY = input.GetCursorPos()
+        self:MouseCapture(true)
+    end
+    
+    function modelViewer:DragMouseRelease()
+        isDragging = false
+        self:MouseCapture(false)
+    end
+    
+    modelViewer.OnMousePressed = function(self, keyCode)
+        if keyCode == MOUSE_LEFT then
+            self:DragMousePress()
+        end
+    end
+    
+    modelViewer.OnMouseReleased = function(self, keyCode)
+        if keyCode == MOUSE_LEFT then
+            self:DragMouseRelease()
+        end
+    end
+    
+    modelViewer.Think = function(self)
+        if isDragging then
+            local mx, my = input.GetCursorPos()
+            local deltaX = mx - lastMouseX
+            local deltaY = my - lastMouseY
+            
+            rotationYaw = rotationYaw + deltaX * 0.5
+            rotationPitch = math.Clamp(rotationPitch + deltaY * 0.5, -89, 89)
+            
+            lastMouseX = mx
+            lastMouseY = my
+        end
+    end
+    
+    modelViewer.LayoutEntity = function(self, ent)
+        if IsValid(ent) then
+            ent:SetAngles(Angle(rotationPitch, rotationYaw, 0))
+        end
+    end
+    
+    -- Change cursor to hand when hovering
+    modelViewer.OnCursorEntered = function(self)
+        self:SetCursor("hand")
+    end
+    
+    modelViewer.OnCursorExited = function(self)
+        self:SetCursor("arrow")
+    end
+    
+    -- Reset rotation function
+    local function ResetRotation()
+        rotationYaw = 180  -- Reset to face forward
+        rotationPitch = 0
+        isDragging = false
+    end
+    
+    -- Reset button click
+    resetBtn.DoClick = function()
+        ResetRotation()
+    end
+    
+    -- Store preview model entity
+    local previewEntity = nil
+    
+    -- Function to update model preview
+    local function UpdateModelPreview(modelPath, skinValue, bodygroupValues, resetRot)
+        if not modelPath or modelPath == "" then
+            modelViewer:SetModel("models/error.mdl")
+            if resetRot then ResetRotation() end
+            return
+        end
+        
+        if resetRot then ResetRotation() end
+        
+        modelViewer:SetModel(modelPath)
+        previewEntity = modelViewer:GetEntity()
+        
+        if IsValid(previewEntity) then
+            -- Apply skin
+            if skinValue then
+                previewEntity:SetSkin(skinValue)
+            end
+            
+            -- Apply bodygroups
+            if bodygroupValues then
+                for bgName, bgValue in pairs(bodygroupValues) do
+                    local bgIndex = previewEntity:FindBodygroupByName(bgName)
+                    if bgIndex ~= -1 then
+                        previewEntity:SetBodygroup(bgIndex, bgValue)
+                    end
+                end
+            end
+            
+            -- Center the model nicely
+            local mn, mx = previewEntity:GetRenderBounds()
+            local size = 0
+            size = math.max(size, math.abs(mn.x) + math.abs(mx.x))
+            size = math.max(size, math.abs(mn.y) + math.abs(mx.y))
+            size = math.max(size, math.abs(mn.z) + math.abs(mx.z))
+            
+            modelViewer:SetFOV(45)
+            modelViewer:SetCamPos(Vector(size, size, size * 0.5))
+            modelViewer:SetLookAt((mn + mx) * 0.5)
+        end
+    end
+    
+    -- Initialize with default error model
+    if isEdit and qualData.model and qualData.model ~= "" then
+        UpdateModelPreview(qualData.model, qualData.skin or 0, qualData.bodygroups or {}, true)
+    else
+        modelViewer:SetModel("models/error.mdl")
+    end
     
     local y = 0
     
@@ -377,7 +574,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
         
         nameEntry = vgui.Create("DTextEntry", scroll)
         nameEntry:SetPos(0, y)
-        nameEntry:SetSize(560, 25)
+        nameEntry:SetSize(530, 25)
         nameEntry:SetPlaceholderText("e.g., medic_basic")
         y = y + 35
     end
@@ -391,7 +588,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     local displayEntry = vgui.Create("DTextEntry", scroll)
     displayEntry:SetPos(0, y)
-    displayEntry:SetSize(560, 25)
+    displayEntry:SetSize(530, 25)
     displayEntry:SetValue(qualData.display_name or "")
     y = y + 35
     
@@ -404,7 +601,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     local descEntry = vgui.Create("DTextEntry", scroll)
     descEntry:SetPos(0, y)
-    descEntry:SetSize(560, 25)
+    descEntry:SetSize(530, 25)
     descEntry:SetValue(qualData.description or "")
     y = y + 35
     
@@ -417,10 +614,201 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     local modelEntry = vgui.Create("DTextEntry", scroll)
     modelEntry:SetPos(0, y)
-    modelEntry:SetSize(560, 25)
+    modelEntry:SetSize(530, 25)
     modelEntry:SetValue(qualData.model or "")
     modelEntry:SetPlaceholderText("e.g., models/player/group01/male_01.mdl")
     y = y + 35
+    
+    -- Skin section
+    local skinLabel = vgui.Create("DLabel", scroll)
+    skinLabel:SetPos(0, y)
+    skinLabel:SetText("Model Skin:")
+    skinLabel:SizeToContents()
+    y = y + 20
+    
+    local skinSlider = vgui.Create("DNumSlider", scroll)
+    skinSlider:SetPos(0, y)
+    skinSlider:SetSize(530, 25)
+    skinSlider:SetMin(0)
+    skinSlider:SetMax(20)
+    skinSlider:SetDecimals(0)
+    skinSlider:SetValue(qualData.skin or 0)
+    skinSlider.OnValueChanged = function(self, value)
+        UpdateModelPreview(modelEntry:GetValue(), math.floor(value), bodygroups, false)
+    end
+    y = y + 35
+    
+    -- Add a refresh button before bodygroups
+    local refreshBtn = vgui.Create("DButton", scroll)
+    refreshBtn:SetPos(0, y)
+    refreshBtn:SetSize(530, 30)
+    refreshBtn:SetText("")
+    refreshBtn.Paint = function(self, w, h)
+        local col = Color(50, 100, 150, 220)
+        if self:IsHovered() then
+            col = Color(60, 120, 170, 255)
+        end
+        draw.RoundedBox(4, 0, 0, w, h, col)
+        draw.SimpleText("🔄 Refresh Skin & Bodygroups", "DermaDefaultBold", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+    end
+    y = y + 35
+    
+    -- Bodygroups section
+    local bodygroupsLabel = vgui.Create("DLabel", scroll)
+    bodygroupsLabel:SetPos(0, y)
+    bodygroupsLabel:SetText("Bodygroups:")
+    bodygroupsLabel:SizeToContents()
+    y = y + 20
+    
+    -- Container for bodygroups
+    local bodygroupContainer = vgui.Create("DPanel", scroll)
+    bodygroupContainer:SetPos(0, y)
+    bodygroupContainer:SetSize(530, 150)
+    bodygroupContainer.Paint = function(self, w, h)
+        draw.RoundedBox(4, 0, 0, w, h, Color(35, 35, 40, 220))
+        surface.SetDrawColor(50, 50, 60, 100)
+        surface.DrawOutlinedRect(0, 0, w, h)
+    end
+    
+    local bodygroupScroll = vgui.Create("DScrollPanel", bodygroupContainer)
+    bodygroupScroll:Dock(FILL)
+    bodygroupScroll:DockMargin(5, 5, 5, 5)
+    
+    local bodygroupList = vgui.Create("DPanel", bodygroupScroll)
+    bodygroupList:Dock(TOP)
+    bodygroupList:SetTall(0)
+    bodygroupList.Paint = function(self, w, h) end
+    
+    -- Store bodygroup selections
+    local bodygroups = qualData.bodygroups or {}
+    local bodygroupSelectors = {}
+    
+    -- Function to update skin slider max based on model
+    local function UpdateSkinRange(modelPath)
+        if not modelPath or modelPath == "" then
+            skinSlider:SetMax(20)
+            return
+        end
+        
+        local modelEntity = ClientsideModel(modelPath, RENDERGROUP_OTHER)
+        if IsValid(modelEntity) then
+            local numSkins = modelEntity:SkinCount()
+            skinSlider:SetMax(math.max(numSkins - 1, 0))
+            modelEntity:Remove()
+        else
+            skinSlider:SetMax(20)
+        end
+    end
+    
+    -- Function to refresh bodygroup list
+    local function RefreshBodygroups(modelPath)
+        bodygroupList:Clear()
+        bodygroupSelectors = {}
+        
+        if not modelPath or modelPath == "" then
+            local noModel = vgui.Create("DLabel", bodygroupList)
+            noModel:Dock(TOP)
+            noModel:SetText("No model selected")
+            noModel:SetTextColor(Color(150, 150, 150, 255))
+            noModel:DockMargin(5, 5, 5, 5)
+            bodygroupList:SetTall(25)
+            return
+        end
+        
+        -- Try to get bodygroups from the model
+        local modelEntity = ClientsideModel(modelPath, RENDERGROUP_OTHER)
+        if not IsValid(modelEntity) then
+            local invalidModel = vgui.Create("DLabel", bodygroupList)
+            invalidModel:Dock(TOP)
+            invalidModel:SetText("Invalid model or model not found")
+            invalidModel:SetTextColor(Color(200, 100, 100, 255))
+            invalidModel:DockMargin(5, 5, 5, 5)
+            bodygroupList:SetTall(25)
+            return
+        end
+        
+        local bgCount = modelEntity:GetNumBodyGroups()
+        
+        if bgCount <= 1 then
+            local noBodygroups = vgui.Create("DLabel", bodygroupList)
+            noBodygroups:Dock(TOP)
+            noBodygroups:SetText("This model has no bodygroups")
+            noBodygroups:SetTextColor(Color(150, 150, 150, 255))
+            noBodygroups:DockMargin(5, 5, 5, 5)
+            bodygroupList:SetTall(25)
+            modelEntity:Remove()
+            return
+        end
+        
+        local bgY = 0
+        for i = 0, bgCount - 1 do
+            local bgName = modelEntity:GetBodygroupName(i)
+            local bgSubCount = modelEntity:GetBodygroupCount(i)
+            
+            if bgSubCount > 1 then
+                local bgLabel = vgui.Create("DLabel", bodygroupList)
+                bgLabel:Dock(TOP)
+                bgLabel:SetText(bgName .. ":")
+                bgLabel:SetFont("DermaDefaultBold")
+                bgLabel:SetTextColor(Color(200, 220, 255, 255))
+                bgLabel:DockMargin(5, 5, 5, 2)
+                bgY = bgY + 20
+                
+                local bgCombo = vgui.Create("DComboBox", bodygroupList)
+                bgCombo:Dock(TOP)
+                bgCombo:DockMargin(10, 0, 5, 5)
+                bgCombo:SetTall(25)
+                
+                for j = 0, bgSubCount - 1 do
+                    bgCombo:AddChoice("Option " .. j, j)
+                end
+                
+                -- Set current value if it exists
+                if bodygroups[bgName] then
+                    bgCombo:ChooseOptionID(bodygroups[bgName] + 1)
+                else
+                    bgCombo:ChooseOptionID(1)
+                end
+                
+                bgCombo.OnSelect = function(self, index, value, data)
+                    bodygroups[bgName] = data
+                    UpdateModelPreview(modelEntry:GetValue(), math.floor(skinSlider:GetValue()), bodygroups, false)
+                end
+                
+                bodygroupSelectors[bgName] = bgCombo
+                bgY = bgY + 30
+            end
+        end
+        
+        bodygroupList:SetTall(math.max(bgY, 25))
+        modelEntity:Remove()
+    end
+    
+    -- Connect refresh button (already created above)
+    refreshBtn.DoClick = function()
+        local modelPath = modelEntry:GetValue()
+        UpdateSkinRange(modelPath)
+        RefreshBodygroups(modelPath)
+        UpdateModelPreview(modelPath, math.floor(skinSlider:GetValue()), bodygroups, true)
+    end
+    
+    -- Refresh bodygroups and skin when model changes
+    modelEntry.OnEnter = function(self)
+        local modelPath = self:GetValue()
+        UpdateSkinRange(modelPath)
+        RefreshBodygroups(modelPath)
+        UpdateModelPreview(modelPath, math.floor(skinSlider:GetValue()), bodygroups, true)
+    end
+    
+    y = y + 160
+    
+    -- Initial load of bodygroups and skin if editing
+    if isEdit and qualData.model and qualData.model ~= "" then
+        timer.Simple(0.1, function()
+            UpdateSkinRange(qualData.model)
+            RefreshBodygroups(qualData.model)
+        end)
+    end
     
     -- Health
     local healthLabel = vgui.Create("DLabel", scroll)
@@ -431,7 +819,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     local healthSlider = vgui.Create("DNumSlider", scroll)
     healthSlider:SetPos(0, y)
-    healthSlider:SetSize(560, 25)
+    healthSlider:SetSize(530, 25)
     healthSlider:SetMin(1)
     healthSlider:SetMax(500)
     healthSlider:SetDecimals(0)
@@ -447,7 +835,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     local armorSlider = vgui.Create("DNumSlider", scroll)
     armorSlider:SetPos(0, y)
-    armorSlider:SetSize(560, 25)
+    armorSlider:SetSize(530, 25)
     armorSlider:SetMin(0)
     armorSlider:SetMax(255)
     armorSlider:SetDecimals(0)
@@ -463,7 +851,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     local weaponsEntry = vgui.Create("DTextEntry", scroll)
     weaponsEntry:SetPos(0, y)
-    weaponsEntry:SetSize(560, 25)
+    weaponsEntry:SetSize(530, 25)
     weaponsEntry:SetValue(qualData.weapons and table.concat(qualData.weapons, ", ") or "")
     weaponsEntry:SetPlaceholderText("e.g., weapon_pistol, weapon_smg1")
     y = y + 35
@@ -493,7 +881,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     local teacherQualEntry = vgui.Create("DTextEntry", scroll)
     teacherQualEntry:SetPos(0, y)
-    teacherQualEntry:SetSize(560, 25)
+    teacherQualEntry:SetSize(530, 25)
     teacherQualEntry:SetValue(qualData.teacher_qual or "")
     teacherQualEntry:SetPlaceholderText("e.g., medic_instructor")
     y = y + 35
@@ -508,7 +896,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     -- Create scrollable panel for job list
     local jobPanel = vgui.Create("DPanel", scroll)
     jobPanel:SetPos(0, y)
-    jobPanel:SetSize(560, 150)
+    jobPanel:SetSize(530, 150)
     jobPanel.Paint = function(self, w, h)
         draw.RoundedBox(4, 0, 0, w, h, Color(35, 35, 40, 220))
         surface.SetDrawColor(50, 50, 60, 100)
@@ -602,7 +990,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     
     local funcEntry = vgui.Create("DTextEntry", scroll)
     funcEntry:SetPos(0, y)
-    funcEntry:SetSize(560, 100)
+    funcEntry:SetSize(530, 100)
     funcEntry:SetMultiline(true)
     funcEntry:SetValue(qualData.custom_function or "")
     funcEntry:SetPlaceholderText("-- Optional Lua code\n-- Example:\n-- ply:SetRunSpeed(400)")
@@ -611,7 +999,7 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
     -- Save button
     local saveBtn = vgui.Create("DButton", scroll)
     saveBtn:SetPos(0, y)
-    saveBtn:SetSize(560, 40)
+    saveBtn:SetSize(530, 40)
     saveBtn:SetText("")
     saveBtn.Paint = function(self, w, h)
         local col = Color(50, 180, 100, 220)
@@ -635,7 +1023,9 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
             allow_teachers = teacherCheck:GetChecked(),
             teacher_qual = teacherQualEntry:GetValue(),
             custom_function = funcEntry:GetValue(),
-            allowed_jobs = {}
+            allowed_jobs = {},
+            bodygroups = bodygroups,
+            skin = math.floor(skinSlider:GetValue())
         }
         
         -- Parse weapons

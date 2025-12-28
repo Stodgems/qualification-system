@@ -41,6 +41,12 @@ function QualSystem:InitializeDatabase()
     -- Add allowed_jobs column if it doesn't exist (for existing databases)
     sql.Query(string.format("ALTER TABLE %s ADD COLUMN allowed_jobs TEXT", qualsTable))
     
+    -- Add bodygroups column if it doesn't exist (for existing databases)
+    sql.Query(string.format("ALTER TABLE %s ADD COLUMN bodygroups TEXT", qualsTable))
+    
+    -- Add skin column if it doesn't exist (for existing databases)
+    sql.Query(string.format("ALTER TABLE %s ADD COLUMN skin INTEGER DEFAULT 0", qualsTable))
+    
     -- Create player qualifications table
     sql.Query(string.format([[
         CREATE TABLE IF NOT EXISTS %s (
@@ -80,6 +86,8 @@ function QualSystem:LoadQualifications()
                 teacher_qual = row.teacher_qual or "",
                 custom_function = row.custom_function or "",
                 allowed_jobs = util.JSONToTable(row.allowed_jobs or "[]") or {},
+                bodygroups = util.JSONToTable(row.bodygroups or "{}") or {},
+                skin = tonumber(row.skin) or 0,
                 created_at = tonumber(row.created_at)
             }
             self.Qualifications[row.name] = qualData
@@ -158,8 +166,8 @@ function QualSystem:CreateQualification(data)
     end
     
     local query = string.format([[
-        INSERT INTO %s (name, display_name, description, model, health, armor, weapons, staff_only, allow_teachers, teacher_qual, custom_function, allowed_jobs, created_at)
-        VALUES (%s, %s, %s, %s, %d, %d, %s, %d, %d, %s, %s, %s, %d)
+        INSERT INTO %s (name, display_name, description, model, health, armor, weapons, staff_only, allow_teachers, teacher_qual, custom_function, allowed_jobs, bodygroups, skin, created_at)
+        VALUES (%s, %s, %s, %s, %d, %d, %s, %d, %d, %s, %s, %s, %s, %d, %d)
     ]], qualsTable,
         sql.SQLStr(data.name),
         sql.SQLStr(data.display_name),
@@ -173,6 +181,8 @@ function QualSystem:CreateQualification(data)
         sql.SQLStr(data.teacher_qual or ""),
         sql.SQLStr(data.custom_function or ""),
         sql.SQLStr(util.TableToJSON(data.allowed_jobs or {})),
+        sql.SQLStr(util.TableToJSON(data.bodygroups or {})),
+        data.skin or 0,
         os.time()
     )
     
@@ -208,7 +218,9 @@ function QualSystem:UpdateQualification(data)
             allow_teachers = %d,
             teacher_qual = %s,
             custom_function = %s,
-            allowed_jobs = %s
+            allowed_jobs = %s,
+            bodygroups = %s,
+            skin = %d
         WHERE name = %s
     ]], qualsTable,
         sql.SQLStr(data.display_name),
@@ -222,6 +234,8 @@ function QualSystem:UpdateQualification(data)
         sql.SQLStr(data.teacher_qual or ""),
         sql.SQLStr(data.custom_function or ""),
         sql.SQLStr(util.TableToJSON(data.allowed_jobs or {})),
+        sql.SQLStr(util.TableToJSON(data.bodygroups or {})),
+        data.skin or 0,
         sql.SQLStr(data.name)
     )
     
