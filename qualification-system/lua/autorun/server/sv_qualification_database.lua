@@ -9,6 +9,10 @@ util.AddNetworkString("QualSystem_RemovePlayerQual")
 util.AddNetworkString("QualSystem_RequestPlayerQuals")
 util.AddNetworkString("QualSystem_SendPlayerQuals")
 util.AddNetworkString("QualSystem_OpenContextMenu")
+util.AddNetworkString("QualSystem_RequestQualificationPlayers")
+util.AddNetworkString("QualSystem_SendQualificationPlayers")
+util.AddNetworkString("QualSystem_AddPlayerToQual")
+util.AddNetworkString("QualSystem_RemovePlayerFromQual")
 
 QualSystem.Qualifications = QualSystem.Qualifications or {}
 QualSystem.PlayerQualifications = QualSystem.PlayerQualifications or {}
@@ -304,6 +308,22 @@ function QualSystem:AddPlayerQualification(ply, qualName, grantedBy)
     -- Apply qualification effects
     self:ApplyQualificationEffects(ply, qualName)
     
+    -- Send updated player qualifications to the player
+    net.Start("QualSystem_SendPlayerQuals")
+    net.WriteString(steamid)
+    net.WriteTable(self.PlayerQualifications[steamid])
+    net.Send(ply)
+    
+    -- Notify the player
+    local qualData = self.Qualifications[qualName]
+    local function QualChatPrint(ply, message)
+        if not IsValid(ply) then return end
+        net.Start("QualSystem_ColoredChat")
+        net.WriteString(message)
+        net.Send(ply)
+    end
+    QualChatPrint(ply, string.format("You have been granted the qualification: %s", qualData.display_name))
+    
     return true
 end
 
@@ -313,6 +333,10 @@ function QualSystem:RemovePlayerQualification(ply, qualName)
     
     local steamid = ply:SteamID()
     local playerQualsTable = self.Config.Tables.player_quals
+    
+    -- Get qualification display name before removing
+    local qualData = self.Qualifications[qualName]
+    local displayName = qualData and qualData.display_name or qualName
     
     local query = string.format([[
         DELETE FROM %s WHERE steamid = %s AND qualification_name = %s
@@ -328,6 +352,21 @@ function QualSystem:RemovePlayerQualification(ply, qualName)
             end
         end
     end
+    
+    -- Send updated player qualifications to the player
+    net.Start("QualSystem_SendPlayerQuals")
+    net.WriteString(steamid)
+    net.WriteTable(self.PlayerQualifications[steamid] or {})
+    net.Send(ply)
+    
+    -- Notify the player
+    local function QualChatPrint(ply, message)
+        if not IsValid(ply) then return end
+        net.Start("QualSystem_ColoredChat")
+        net.WriteString(message)
+        net.Send(ply)
+    end
+    QualChatPrint(ply, string.format("You have been removed from the qualification: %s", displayName))
     
     return true
 end
@@ -352,6 +391,32 @@ end
 function QualSystem:GetPlayerQualifications(ply)
     if not IsValid(ply) then return {} end
     return self.PlayerQualifications[ply:SteamID()] or {}
+end
+
+-- Get all players with a specific qualification
+function QualSystem:GetPlayersWithQualification(qualName)
+    local playerQualsTable = self.Config.Tables.player_quals
+    local query = string.format([[
+        SELECT steamid, granted_by, granted_at FROM %s WHERE qualification_name = %s
+    ]], playerQualsTable, sql.SQLStr(qualName))
+    
+    local results = sql.Query(query)
+    local players = {}
+    
+    if results then
+        for _, row in ipairs(results) do
+            local ply = player.GetBySteamID(row.steamid)
+            table.insert(players, {
+                steamid = row.steamid,
+                name = IsValid(ply) and ply:Nick() or "Unknown",
+                is_online = IsValid(ply),
+                granted_by = row.granted_by,
+                granted_at = tonumber(row.granted_at)
+            })
+        end
+    end
+    
+    return players
 end
 
 -- Sync qualifications to all clients
@@ -383,6 +448,104 @@ hook.Add("PlayerInitialSpawn", "QualSystem_PlayerSpawn", function(ply)
             QualSystem:ApplyQualificationEffects(ply, qual.qualification_name)
         end
     end)
+end)
+
+-- Network receiver to get players with a specific qualification
+net.Receive("QualSystem_RequestQualificationPlayers", function(len, ply)
+    if not QualSystem:IsAdmin(ply) then return end
+    
+    local qualName = net.ReadString()
+    local players = QualSystem:GetPlayersWithQualification(qualName)
+    
+    net.Start("QualSystem_SendQualificationPlayers")
+    net.WriteString(qualName)
+    net.WriteTable(players)
+    net.Send(ply)
+end)
+
+-- Network receiver to add player to qualification
+net.Receive("QualSystem_AddPlayerToQual", function(len, ply)
+    if not QualSystem:IsAdmin(ply) then return end
+    
+    local steamid = net.ReadString()
+    local qualName = net.ReadString()
+    
+    -- Check if qualification exists
+    if not QualSystem.Qualifications[qualName] then
+        local function QualChatPrint(ply, message)
+            if not IsValid(ply) then return end
+            net.Start("QualSystem_ColoredChat")
+            net.WriteString(message)
+            net.Send(ply)
+        end
+        QualChatPrint(ply, "Qualification does not exist!")
+        return
+    end
+    
+    -- Try to find online player first
+    local targetPly = player.GetBySteamID(steamid)
+    if IsValid(targetPly) then
+        -- Player is online, add qualification normally
+        QualSystem:AddPlayerQualification(targetPly, qualName, ply:Nick())
+    else
+        -- Player is offline, add directly to database
+        local playerQualsTable = QualSystem.Config.Tables.player_quals
+        
+        local query = string.format([[
+            INSERT OR REPLACE INTO %s (steamid, qualification_name, granted_by, granted_at)
+            VALUES (%s, %s, %s, %d)
+        ]], playerQualsTable,
+            sql.SQLStr(steamid),
+            sql.SQLStr(qualName),
+            sql.SQLStr(ply:Nick()),
+            os.time()
+        )
+        
+        sql.Query(query)
+        
+        -- Update cache
+        if not QualSystem.PlayerQualifications[steamid] then
+            QualSystem.PlayerQualifications[steamid] = {}
+        end
+        
+        -- Check if already exists in cache
+        local exists = false
+        for _, qual in ipairs(QualSystem.PlayerQualifications[steamid]) do
+            if qual.qualification_name == qualName then
+                exists = true
+                break
+            end
+        end
+        
+        if not exists then
+            table.insert(QualSystem.PlayerQualifications[steamid], {
+                qualification_name = qualName,
+                granted_by = ply:Nick(),
+                granted_at = os.time()
+            })
+        end
+        
+        local function QualChatPrint(ply, message)
+            if not IsValid(ply) then return end
+            net.Start("QualSystem_ColoredChat")
+            net.WriteString(message)
+            net.Send(ply)
+        end
+        QualChatPrint(ply, "Player added to qualification (offline)")
+    end
+end)
+
+-- Network receiver to remove player from qualification
+net.Receive("QualSystem_RemovePlayerFromQual", function(len, ply)
+    if not QualSystem:IsAdmin(ply) then return end
+    
+    local steamid = net.ReadString()
+    local qualName = net.ReadString()
+    
+    local targetPly = player.GetBySteamID(steamid)
+    if not IsValid(targetPly) then return end
+    
+    QualSystem:RemovePlayerQualification(targetPly, qualName)
 end)
 
 print("[Qualification System] Server-side database loaded!")

@@ -1,5 +1,14 @@
 -- Server-side qualification effects application
 
+-- Helper function for colored chat messages
+local function QualChatPrint(ply, message)
+    if not IsValid(ply) then return end
+    
+    net.Start("QualSystem_ColoredChat")
+    net.WriteString(message)
+    net.Send(ply)
+end
+
 -- Apply qualification effects to a player
 function QualSystem:ApplyQualificationEffects(ply, qualName)
     if not IsValid(ply) then return end
@@ -78,7 +87,7 @@ hook.Add("PlayerSay", "QualSystem_ChatCommands", function(ply, text)
             net.Start("QualSystem_OpenAdminMenu")
             net.Send(ply)
         else
-            ply:ChatPrint("[Qualification System] You don't have permission to use this command!")
+            QualChatPrint(ply, "You don't have permission to use this command!")
         end
         return ""
     end
@@ -97,9 +106,9 @@ net.Receive("QualSystem_CreateQualification", function(len, ply)
     
     local data = net.ReadTable()
     if QualSystem:CreateQualification(data) then
-        ply:ChatPrint("[Qualification System] Qualification created successfully!")
+        QualChatPrint(ply, "Qualification created successfully!")
     else
-        ply:ChatPrint("[Qualification System] Failed to create qualification!")
+        QualChatPrint(ply, "Failed to create qualification!")
     end
 end)
 
@@ -108,9 +117,9 @@ net.Receive("QualSystem_UpdateQualification", function(len, ply)
     
     local data = net.ReadTable()
     if QualSystem:UpdateQualification(data) then
-        ply:ChatPrint("[Qualification System] Qualification updated successfully!")
+        QualChatPrint(ply, "Qualification updated successfully!")
     else
-        ply:ChatPrint("[Qualification System] Failed to update qualification!")
+        QualChatPrint(ply, "Failed to update qualification!")
     end
 end)
 
@@ -119,7 +128,7 @@ net.Receive("QualSystem_DeleteQualification", function(len, ply)
     
     local qualName = net.ReadString()
     QualSystem:DeleteQualification(qualName)
-    ply:ChatPrint("[Qualification System] Qualification deleted successfully!")
+    QualChatPrint(ply, "Qualification deleted successfully!")
 end)
 
 net.Receive("QualSystem_AddPlayerQual", function(len, ply)
@@ -128,34 +137,34 @@ net.Receive("QualSystem_AddPlayerQual", function(len, ply)
     
     local target = player.GetBySteamID(targetSteamID)
     if not IsValid(target) then 
-        ply:ChatPrint("[Qualification System] Target player not found!")
+        QualChatPrint(ply, "Target player not found!")
         return 
     end
     
     local qualData = QualSystem.Qualifications[qualName]
     if not qualData then
-        ply:ChatPrint("[Qualification System] Invalid qualification!")
+        QualChatPrint(ply, "Invalid qualification!")
         return
     end
     
     -- Check permissions
     if not QualSystem:CanManageQualification(ply, qualData) then
-        ply:ChatPrint("[Qualification System] You don't have permission to assign this qualification!")
+        QualChatPrint(ply, "You don't have permission to assign this qualification!")
         return
     end
     
     -- Check job restrictions
     if not QualSystem:IsPlayerJobAllowed(target, qualData) then
         local jobsList = table.concat(qualData.allowed_jobs, ", ")
-        ply:ChatPrint(string.format("[Qualification System] %s's job is not allowed for this qualification! Allowed jobs: %s", target:Nick(), jobsList))
+        QualChatPrint(ply, string.format("%s's job is not allowed for this qualification! Allowed jobs: %s", target:Nick(), jobsList))
         return
     end
     
     if QualSystem:AddPlayerQualification(target, qualName, ply:Nick()) then
-        ply:ChatPrint(string.format("[Qualification System] Added '%s' to %s", qualData.display_name, target:Nick()))
-        target:ChatPrint(string.format("[Qualification System] You have been granted the '%s' qualification!", qualData.display_name))
+        QualChatPrint(ply, string.format("Added '%s' to %s", qualData.display_name, target:Nick()))
+        QualChatPrint(target, string.format("You have been granted the '%s' qualification!", qualData.display_name))
     else
-        ply:ChatPrint("[Qualification System] Failed to add qualification!")
+        QualChatPrint(ply, "Failed to add qualification!")
     end
 end)
 
@@ -165,27 +174,27 @@ net.Receive("QualSystem_RemovePlayerQual", function(len, ply)
     
     local target = player.GetBySteamID(targetSteamID)
     if not IsValid(target) then 
-        ply:ChatPrint("[Qualification System] Target player not found!")
+        QualChatPrint(ply, "Target player not found!")
         return 
     end
     
     local qualData = QualSystem.Qualifications[qualName]
     if not qualData then
-        ply:ChatPrint("[Qualification System] Invalid qualification!")
+        QualChatPrint(ply, "Invalid qualification!")
         return
     end
     
     -- Check permissions
     if not QualSystem:CanManageQualification(ply, qualData) then
-        ply:ChatPrint("[Qualification System] You don't have permission to remove this qualification!")
+        QualChatPrint(ply, "You don't have permission to remove this qualification!")
         return
     end
     
     if QualSystem:RemovePlayerQualification(target, qualName) then
-        ply:ChatPrint(string.format("[Qualification System] Removed '%s' from %s", qualData.display_name, target:Nick()))
-        target:ChatPrint(string.format("[Qualification System] Your '%s' qualification has been removed.", qualData.display_name))
+        QualChatPrint(ply, string.format("Removed '%s' from %s", qualData.display_name, target:Nick()))
+        QualChatPrint(target, string.format("Your '%s' qualification has been removed.", qualData.display_name))
     else
-        ply:ChatPrint("[Qualification System] Failed to remove qualification!")
+        QualChatPrint(ply, "Failed to remove qualification!")
     end
 end)
 

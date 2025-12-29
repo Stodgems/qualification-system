@@ -249,9 +249,26 @@ function QualSystem:OpenAdminMenu()
             self:OpenQualificationEditor(frame, qualName)
         end
         
+        -- Manage Players button
+        local playersBtn = vgui.Create("DButton", detailsPanel)
+        playersBtn:SetPos(120, y)
+        playersBtn:SetSize(140, 35)
+        playersBtn:SetText("")
+        playersBtn.Paint = function(self, w, h)
+            local col = Color(60, 160, 80, 220)
+            if self:IsHovered() then
+                col = Color(70, 180, 90, 255)
+            end
+            draw.RoundedBox(4, 0, 0, w, h, col)
+            draw.SimpleText("Manage Players", "DermaDefaultBold", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+        end
+        playersBtn.DoClick = function()
+            self:OpenPlayerManagement(qualName)
+        end
+        
         -- Delete button
         local deleteBtn = vgui.Create("DButton", detailsPanel)
-        deleteBtn:SetPos(120, y)
+        deleteBtn:SetPos(270, y)
         deleteBtn:SetSize(100, 35)
         deleteBtn:SetText("")
         deleteBtn.Paint = function(self, w, h)
@@ -1063,6 +1080,279 @@ function QualSystem:OpenQualificationEditor(parent, editQualName)
             end
         end)
     end
+end
+
+function QualSystem:OpenPlayerManagement(qualName)
+    local qualData = self.Qualifications[qualName]
+    if not qualData then return end
+    
+    -- Create frame
+    local frame = vgui.Create("DFrame")
+    frame:SetSize(700, 600)
+    frame:Center()
+    frame:SetTitle("")
+    frame:SetVisible(true)
+    frame:SetDraggable(true)
+    frame:ShowCloseButton(false)
+    frame:MakePopup()
+    
+    frame.Paint = function(self, w, h)
+        draw.RoundedBox(8, 0, 0, w, h, Color(25, 25, 30, 250))
+        draw.RoundedBoxEx(8, 0, 0, w, 40, Color(35, 100, 180, 255), true, true, false, false)
+        draw.RoundedBox(0, 0, 35, w, 5, Color(45, 120, 200, 255))
+        draw.SimpleText("Players: " .. qualData.display_name, "DermaLarge", 15, 10, Color(255, 255, 255, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+    end
+    
+    -- Close button
+    local closeBtn = vgui.Create("DButton", frame)
+    closeBtn:SetSize(30, 30)
+    closeBtn:SetPos(frame:GetWide() - 35, 5)
+    closeBtn:SetText("")
+    closeBtn.Paint = function(self, w, h)
+        local col = Color(180, 50, 50, 200)
+        if self:IsHovered() then
+            col = Color(220, 60, 60, 255)
+        end
+        draw.RoundedBox(4, 0, 0, w, h, col)
+        draw.SimpleText("✕", "DermaLarge", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+    end
+    closeBtn.DoClick = function()
+        frame:Close()
+    end
+    
+    -- Content panel
+    local contentPanel = vgui.Create("DPanel", frame)
+    contentPanel:Dock(FILL)
+    contentPanel:DockMargin(10, 50, 10, 10)
+    contentPanel.Paint = function(self, w, h)
+        draw.RoundedBox(6, 0, 0, w, h, Color(35, 35, 40, 220))
+    end
+    
+    -- Add player section
+    local addPanel = vgui.Create("DPanel", contentPanel)
+    addPanel:Dock(TOP)
+    addPanel:SetTall(100)
+    addPanel:DockMargin(5, 5, 5, 5)
+    addPanel.Paint = function(self, w, h)
+        draw.RoundedBox(4, 0, 0, w, h, Color(45, 45, 50, 200))
+        draw.SimpleText("Add Player:", "DermaDefaultBold", 10, 10, Color(255, 255, 255, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+    end
+    
+    -- Player selector dropdown
+    local playerDropdown = vgui.Create("DComboBox", addPanel)
+    playerDropdown:SetPos(10, 30)
+    playerDropdown:SetSize(440, 25)
+    playerDropdown:SetValue("Select online player...")
+    
+    -- Populate with online players
+    for _, ply in ipairs(player.GetAll()) do
+        playerDropdown:AddChoice(ply:Nick(), ply:SteamID())
+    end
+    
+    -- Add by dropdown button
+    local addByDropdownBtn = vgui.Create("DButton", addPanel)
+    addByDropdownBtn:SetPos(460, 30)
+    addByDropdownBtn:SetSize(210, 25)
+    addByDropdownBtn:SetText("")
+    addByDropdownBtn.Paint = function(self, w, h)
+        local col = Color(60, 160, 80, 220)
+        if self:IsHovered() then
+            col = Color(70, 180, 90, 255)
+        end
+        draw.RoundedBox(4, 0, 0, w, h, col)
+        draw.SimpleText("Add Selected Player", "DermaDefaultBold", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+    end
+    addByDropdownBtn.DoClick = function()
+        local _, steamid = playerDropdown:GetSelected()
+        if not steamid then
+            Derma_Message("Please select a player!", "Error", "OK")
+            return
+        end
+        
+        net.Start("QualSystem_AddPlayerToQual")
+        net.WriteString(steamid)
+        net.WriteString(qualName)
+        net.SendToServer()
+        
+        timer.Simple(0.3, function()
+            if IsValid(frame) then
+                frame:Close()
+                QualSystem:OpenPlayerManagement(qualName)
+            end
+        end)
+    end
+    
+    -- SteamID entry
+    local steamidLabel = vgui.Create("DLabel", addPanel)
+    steamidLabel:SetPos(10, 60)
+    steamidLabel:SetText("Or add by SteamID:")
+    steamidLabel:SetTextColor(Color(200, 200, 200, 255))
+    steamidLabel:SizeToContents()
+    
+    local steamidEntry = vgui.Create("DTextEntry", addPanel)
+    steamidEntry:SetPos(10, 75)
+    steamidEntry:SetSize(440, 20)
+    steamidEntry:SetPlaceholderText("STEAM_0:X:XXXXXXXX")
+    
+    -- Add by SteamID button
+    local addBySteamidBtn = vgui.Create("DButton", addPanel)
+    addBySteamidBtn:SetPos(460, 70)
+    addBySteamidBtn:SetSize(210, 25)
+    addBySteamidBtn:SetText("")
+    addBySteamidBtn.Paint = function(self, w, h)
+        local col = Color(60, 160, 80, 220)
+        if self:IsHovered() then
+            col = Color(70, 180, 90, 255)
+        end
+        draw.RoundedBox(4, 0, 0, w, h, col)
+        draw.SimpleText("Add by SteamID", "DermaDefaultBold", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+    end
+    addBySteamidBtn.DoClick = function()
+        local steamid = steamidEntry:GetValue()
+        if steamid == "" then
+            Derma_Message("Please enter a SteamID!", "Error", "OK")
+            return
+        end
+        
+        -- Basic validation
+        if not string.match(steamid, "STEAM_%d:%d:%d+") then
+            Derma_Message("Invalid SteamID format! Use: STEAM_0:X:XXXXXXXX", "Error", "OK")
+            return
+        end
+        
+        net.Start("QualSystem_AddPlayerToQual")
+        net.WriteString(steamid)
+        net.WriteString(qualName)
+        net.SendToServer()
+        
+        timer.Simple(0.3, function()
+            if IsValid(frame) then
+                frame:Close()
+                QualSystem:OpenPlayerManagement(qualName)
+            end
+        end)
+    end
+    
+    -- Players list
+    local listLabel = vgui.Create("DLabel", contentPanel)
+    listLabel:Dock(TOP)
+    listLabel:SetText("Current Players:")
+    listLabel:SetFont("DermaDefaultBold")
+    listLabel:SetTextColor(Color(255, 255, 255))
+    listLabel:DockMargin(10, 10, 10, 5)
+    
+    local playersList = vgui.Create("DScrollPanel", contentPanel)
+    playersList:Dock(FILL)
+    playersList:DockMargin(5, 0, 5, 5)
+    
+    -- Request player data from server
+    net.Start("QualSystem_RequestQualificationPlayers")
+    net.WriteString(qualName)
+    net.SendToServer()
+    
+    -- Network receiver for player data
+    net.Receive("QualSystem_SendQualificationPlayers", function()
+        local receivedQualName = net.ReadString()
+        if receivedQualName ~= qualName then return end
+        if not IsValid(frame) then return end
+        
+        local players = net.ReadTable()
+        playersList:Clear()
+        
+        if #players == 0 then
+            local noPlayers = vgui.Create("DLabel", playersList)
+            noPlayers:Dock(TOP)
+            noPlayers:SetText("No players have this qualification")
+            noPlayers:SetTextColor(Color(150, 150, 150))
+            noPlayers:DockMargin(10, 10, 10, 10)
+            return
+        end
+        
+        for _, playerData in ipairs(players) do
+            local playerPanel = vgui.Create("DPanel", playersList)
+            playerPanel:Dock(TOP)
+            playerPanel:SetTall(60)
+            playerPanel:DockMargin(5, 5, 5, 0)
+            playerPanel.Paint = function(self, w, h)
+                local col = Color(50, 50, 55, 200)
+                if self:IsHovered() then
+                    col = Color(60, 60, 70, 230)
+                end
+                draw.RoundedBox(4, 0, 0, w, h, col)
+                
+                -- Player name
+                local nameText = playerData.name
+                if not playerData.is_online then
+                    nameText = nameText .. " (Offline)"
+                end
+                draw.SimpleText(nameText, "DermaDefaultBold", 10, 8, Color(255, 255, 255, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+                
+                -- SteamID
+                draw.SimpleText("SteamID: " .. playerData.steamid, "DermaDefault", 10, 25, Color(150, 180, 220, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+                
+                -- Granted info
+                local grantedText = "Granted by: " .. playerData.granted_by
+                draw.SimpleText(grantedText, "DermaDefault", 10, 42, Color(180, 180, 180, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+            end
+            
+            -- Copy SteamID button
+            local copyBtn = vgui.Create("DButton", playerPanel)
+            copyBtn:Dock(RIGHT)
+            copyBtn:SetWide(80)
+            copyBtn:DockMargin(5, 10, 5, 10)
+            copyBtn:SetText("")
+            copyBtn.Paint = function(self, w, h)
+                local col = Color(60, 120, 180, 220)
+                if self:IsHovered() then
+                    col = Color(70, 140, 200, 255)
+                end
+                draw.RoundedBox(4, 0, 0, w, h, col)
+                draw.SimpleText("Copy ID", "DermaDefaultBold", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+            end
+            copyBtn.DoClick = function()
+                SetClipboardText(playerData.steamid)
+                chat.AddText(Color(100, 255, 150), "[Qualification System] ", Color(255, 255, 255), "SteamID copied to clipboard!")
+            end
+            
+            -- Remove button (only for online players)
+            if playerData.is_online then
+                local removeBtn = vgui.Create("DButton", playerPanel)
+                removeBtn:Dock(RIGHT)
+                removeBtn:SetWide(80)
+                removeBtn:DockMargin(0, 10, 5, 10)
+                removeBtn:SetText("")
+                removeBtn.Paint = function(self, w, h)
+                    local col = Color(180, 50, 50, 200)
+                    if self:IsHovered() then
+                        col = Color(220, 60, 60, 255)
+                    end
+                    draw.RoundedBox(4, 0, 0, w, h, col)
+                    draw.SimpleText("Remove", "DermaDefaultBold", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+                end
+                removeBtn.DoClick = function()
+                    Derma_Query(
+                        "Remove " .. playerData.name .. " from this qualification?",
+                        "Confirm Remove",
+                        "Yes",
+                        function()
+                            net.Start("QualSystem_RemovePlayerFromQual")
+                            net.WriteString(playerData.steamid)
+                            net.WriteString(qualName)
+                            net.SendToServer()
+                            
+                            timer.Simple(0.3, function()
+                                if IsValid(frame) then
+                                    frame:Close()
+                                    QualSystem:OpenPlayerManagement(qualName)
+                                end
+                            end)
+                        end,
+                        "No"
+                    )
+                end
+            end
+        end
+    end)
 end
 
 print("[Qualification System] Client-side admin menu loaded!")
