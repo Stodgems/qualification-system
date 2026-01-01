@@ -257,8 +257,66 @@ end
 -- Delete a qualification
 function QualSystem:DeleteQualification(name)
     local qualsTable = self.Config.Tables.qualifications
+    local playerQualsTable = self.Config.Tables.player_quals
+    
+    -- Delete the qualification itself
     local query = string.format("DELETE FROM %s WHERE name = %s", qualsTable, sql.SQLStr(name))
     sql.Query(query)
+    
+    -- Remove this qualification from all players
+    local removeQuery = string.format("DELETE FROM %s WHERE qualification_name = %s", playerQualsTable, sql.SQLStr(name))
+    sql.Query(removeQuery)
+    
+    -- Clean up player qualifications cache
+    for steamid, quals in pairs(self.PlayerQualifications) do
+        for i = #quals, 1, -1 do
+            if quals[i].qualification_name == name then
+                table.remove(quals, i)
+            end
+        end
+    end
+    
+    -- Reset loadout preferences for players who had this as their default
+    local loadoutTable = "qualification_system_loadouts"
+    local resetQuery = string.format([[
+        UPDATE %s SET default_loadout = 'none', auto_equip = 0 
+        WHERE default_loadout = %s
+    ]], loadoutTable, sql.SQLStr(name))
+    sql.Query(resetQuery)
+    
+    -- Clear from loadout preferences cache and active loadouts
+    for steamid, pref in pairs(self.LoadoutPreferences or {}) do
+        if pref.default_loadout == name then
+            pref.default_loadout = "none"
+            pref.auto_equip = false
+        end
+    end
+    
+    for steamid, activeLoadout in pairs(self.ActiveLoadouts or {}) do
+        if activeLoadout == name then
+            self.ActiveLoadouts[steamid] = "none"
+        end
+    end
+    
+    -- Notify online players who were affected
+    for _, ply in ipairs(player.GetAll()) do
+        local steamid = ply:SteamID()
+        
+        -- Send updated player qualifications
+        net.Start("QualSystem_SendPlayerQuals")
+        net.WriteString(steamid)
+        net.WriteTable(self.PlayerQualifications[steamid] or {})
+        net.Send(ply)
+        
+        -- Send updated loadout data if they were affected
+        if self.LoadoutPreferences[steamid] then
+            timer.Simple(0.1, function()
+                if IsValid(ply) then
+                    self:SendLoadoutData(ply)
+                end
+            end)
+        end
+    end
     
     self:LoadQualifications()
     self:SyncQualificationsToClients()
@@ -353,11 +411,30 @@ function QualSystem:RemovePlayerQualification(ply, qualName)
         end
     end
     
+    -- If this was their active loadout, reset it to none
+    if self.ActiveLoadouts and self.ActiveLoadouts[steamid] == qualName then
+        self.ActiveLoadouts[steamid] = "none"
+    end
+    
+    -- If this was their default loadout, reset it
+    if self.LoadoutPreferences and self.LoadoutPreferences[steamid] then
+        if self.LoadoutPreferences[steamid].default_loadout == qualName then
+            self:SavePlayerLoadoutPreference(steamid, "none", false)
+        end
+    end
+    
     -- Send updated player qualifications to the player
     net.Start("QualSystem_SendPlayerQuals")
     net.WriteString(steamid)
     net.WriteTable(self.PlayerQualifications[steamid] or {})
     net.Send(ply)
+    
+    -- Send updated loadout data
+    timer.Simple(0.1, function()
+        if IsValid(ply) then
+            self:SendLoadoutData(ply)
+        end
+    end)
     
     -- Notify the player
     local function QualChatPrint(ply, message)
@@ -442,10 +519,13 @@ hook.Add("PlayerInitialSpawn", "QualSystem_PlayerSpawn", function(ply)
         net.WriteTable(QualSystem.Qualifications)
         net.Send(ply)
         
-        -- Apply existing qualifications
+        -- Apply existing qualifications (only if they still exist)
         local quals = QualSystem:GetPlayerQualifications(ply)
         for _, qual in ipairs(quals) do
-            QualSystem:ApplyQualificationEffects(ply, qual.qualification_name)
+            -- Check if qualification still exists before applying
+            if QualSystem.Qualifications[qual.qualification_name] then
+                QualSystem:ApplyQualificationEffects(ply, qual.qualification_name)
+            end
         end
     end)
 end)

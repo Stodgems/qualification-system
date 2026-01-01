@@ -40,9 +40,22 @@ function QualSystem:LoadPlayerLoadoutPreference(steamid)
     local result = sql.Query(query)
     
     if result then
+        local defaultLoadout = result[1].default_loadout
+        local autoEquip = tonumber(result[1].auto_equip) == 1
+        
+        -- Validate that the qualification still exists
+        if defaultLoadout ~= "none" and not self.Qualifications[defaultLoadout] then
+            -- Qualification was deleted, reset to none
+            self:SavePlayerLoadoutPreference(steamid, "none", false)
+            return {
+                default_loadout = "none",
+                auto_equip = false
+            }
+        end
+        
         return {
-            default_loadout = result[1].default_loadout,
-            auto_equip = tonumber(result[1].auto_equip) == 1
+            default_loadout = defaultLoadout,
+            auto_equip = autoEquip
         }
     end
     
@@ -55,6 +68,12 @@ end
 -- Save player loadout preference
 function QualSystem:SavePlayerLoadoutPreference(steamid, defaultLoadout, autoEquip)
     local loadoutTable = "qualification_system_loadouts"
+    
+    -- Validate qualification exists before saving
+    if defaultLoadout ~= "none" and not self.Qualifications[defaultLoadout] then
+        defaultLoadout = "none"
+        autoEquip = false
+    end
     
     local query = string.format([[
         INSERT OR REPLACE INTO %s (steamid, default_loadout, auto_equip)
@@ -86,15 +105,19 @@ function QualSystem:EquipQualificationLoadout(ply, qualName)
         return true
     end
     
-    -- Check if player has this qualification
-    if not self:PlayerHasQualification(ply, qualName) then
-        QualChatPrint(ply, "You don't have access to this qualification!")
+    -- Check if qualification exists
+    if not self.Qualifications[qualName] then
+        QualChatPrint(ply, "This qualification no longer exists!")
+        -- Reset to default loadout
+        self.ActiveLoadouts[steamid] = "none"
         return false
     end
     
-    -- Check if qualification exists
-    if not self.Qualifications[qualName] then
-        QualChatPrint(ply, "Invalid qualification!")
+    -- Check if player has this qualification
+    if not self:PlayerHasQualification(ply, qualName) then
+        QualChatPrint(ply, "You don't have access to this qualification!")
+        -- Reset to default loadout
+        self.ActiveLoadouts[steamid] = "none"
         return false
     end
     
@@ -137,6 +160,14 @@ function QualSystem:SendLoadoutData(ply)
     if defaultLoadout ~= "none" and not self.Qualifications[defaultLoadout] then
         defaultLoadout = "none"
         autoEquip = false
+        -- Update the preference
+        self:SavePlayerLoadoutPreference(steamid, "none", false)
+    end
+    
+    -- Validate active loadout still exists
+    if activeLoadout ~= "none" and not self.Qualifications[activeLoadout] then
+        activeLoadout = "none"
+        self.ActiveLoadouts[steamid] = "none"
     end
     
     net.Start("QualSystem_SendLoadoutData")
@@ -164,6 +195,12 @@ net.Receive("QualSystem_SetDefaultLoadout", function(len, ply)
     local autoEquip = net.ReadBool()
     
     local steamid = ply:SteamID()
+    
+    -- Validate qualification exists
+    if defaultLoadout ~= "none" and not QualSystem.Qualifications[defaultLoadout] then
+        QualChatPrint(ply, "That qualification no longer exists!")
+        return
+    end
     
     -- Save to database and cache
     QualSystem:SavePlayerLoadoutPreference(steamid, defaultLoadout, autoEquip)
@@ -203,13 +240,24 @@ hook.Add("PlayerSpawn", "QualSystem_ApplyLoadout", function(ply)
         
         local preference = QualSystem.LoadoutPreferences[steamid]
         
+        -- Validate the default loadout still exists
+        if preference.default_loadout ~= "none" and not QualSystem.Qualifications[preference.default_loadout] then
+            -- Qualification was deleted, reset preferences
+            QualSystem:SavePlayerLoadoutPreference(steamid, "none", false)
+            preference = {
+                default_loadout = "none",
+                auto_equip = false
+            }
+        end
+        
         -- Auto-equip if enabled and a default is set
         if preference.auto_equip and preference.default_loadout and preference.default_loadout ~= "none" then
-            -- Check if the qualification still exists
-            if QualSystem.Qualifications[preference.default_loadout] then
+            -- Double-check the qualification still exists and player still has it
+            if QualSystem.Qualifications[preference.default_loadout] and 
+               QualSystem:PlayerHasQualification(ply, preference.default_loadout) then
                 QualSystem:EquipQualificationLoadout(ply, preference.default_loadout)
             else
-                -- Qualification was deleted, reset to default
+                -- Either qualification was deleted or player no longer has it
                 QualSystem.ActiveLoadouts[steamid] = "none"
                 QualSystem:SavePlayerLoadoutPreference(steamid, "none", false)
             end
@@ -248,6 +296,11 @@ end)
 local oldApplyEffects = QualSystem.ApplyQualificationEffects
 function QualSystem:ApplyQualificationEffects(ply, qualName)
     if not IsValid(ply) then return end
+    
+    -- Check if qualification still exists
+    if not self.Qualifications[qualName] then
+        return
+    end
     
     local steamid = ply:SteamID()
     local activeLoadout = self.ActiveLoadouts[steamid]

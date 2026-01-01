@@ -12,7 +12,12 @@ end
 -- Apply qualification effects to a player
 function QualSystem:ApplyQualificationEffects(ply, qualName)
     if not IsValid(ply) then return end
-    if not self.Qualifications[qualName] then return end
+    
+    -- Check if qualification still exists
+    if not self.Qualifications[qualName] then 
+        print(string.format("[Qualification System] Attempted to apply non-existent qualification '%s' to %s", qualName, ply:Nick()))
+        return 
+    end
     
     local qualData = self.Qualifications[qualName]
     
@@ -220,10 +225,13 @@ hook.Add("OnPlayerChangedTeam", "QualSystem_JobChange", function(ply, oldTeam, n
     timer.Simple(0.1, function()
         if not IsValid(ply) then return end
         
-        -- Reapply all player's qualifications
+        -- Reapply all player's qualifications (only valid ones)
         local quals = QualSystem:GetPlayerQualifications(ply)
         for _, qual in ipairs(quals) do
-            QualSystem:ApplyQualificationEffects(ply, qual.qualification_name)
+            -- Only apply if qualification still exists
+            if QualSystem.Qualifications[qual.qualification_name] then
+                QualSystem:ApplyQualificationEffects(ply, qual.qualification_name)
+            end
         end
     end)
 end)
