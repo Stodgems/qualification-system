@@ -25,7 +25,7 @@ end)
 function QualSystem:OpenLoadoutMenu()
     -- Create main frame
     local frame = vgui.Create("DFrame")
-    frame:SetSize(500, 700)
+    frame:SetSize(500, 480)
     frame:Center()
     frame:SetTitle("")
     frame:SetVisible(true)
@@ -232,99 +232,6 @@ function QualSystem:OpenLoadoutMenu()
     end
     
     loadoutList:SetTall(math.max(y, 10))
-    
-    -- Auto-equip preferences panel
-    local prefsPanel = vgui.Create("DPanel", contentPanel)
-    prefsPanel:Dock(FILL)
-    prefsPanel:DockMargin(0, 0, 0, 0)
-    prefsPanel.Paint = function(self, w, h)
-        draw.RoundedBox(6, 0, 0, w, h, Color(35, 35, 40, 220))
-        surface.SetDrawColor(50, 50, 60, 100)
-        surface.DrawOutlinedRect(0, 0, w, h)
-    end
-    
-    local prefsLabel = vgui.Create("DLabel", prefsPanel)
-    prefsLabel:Dock(TOP)
-    prefsLabel:SetText("Auto-Equip Preferences:")
-    prefsLabel:SetFont("DermaDefaultBold")
-    prefsLabel:SetTextColor(Color(200, 220, 255, 255))
-    prefsLabel:DockMargin(10, 8, 10, 5)
-    
-    -- Auto-equip checkbox
-    local autoEquipCheck = vgui.Create("DCheckBoxLabel", prefsPanel)
-    autoEquipCheck:Dock(TOP)
-    autoEquipCheck:SetText("Auto-equip default loadout on spawn")
-    autoEquipCheck:SetValue(self.LoadoutData.auto_equip or false)
-    autoEquipCheck:DockMargin(10, 5, 10, 5)
-    autoEquipCheck:SetTextColor(Color(255, 255, 255, 255))
-    
-    -- Default loadout dropdown
-    local defaultLabel = vgui.Create("DLabel", prefsPanel)
-    defaultLabel:Dock(TOP)
-    defaultLabel:SetText("Default Loadout:")
-    defaultLabel:SetTextColor(Color(180, 180, 200, 255))
-    defaultLabel:DockMargin(10, 5, 10, 2)
-    
-    local defaultCombo = vgui.Create("DComboBox", prefsPanel)
-    defaultCombo:Dock(TOP)
-    defaultCombo:DockMargin(10, 0, 10, 5)
-    defaultCombo:SetTall(25)
-    
-    -- Add default option
-    defaultCombo:AddChoice("Default Loadout", "none")
-    
-    -- Store choice IDs for lookup
-    local choiceMap = {}
-    choiceMap["none"] = 1
-    local choiceIndex = 2
-    
-    -- Add qualification options
-    for _, qual in ipairs(playerQuals) do
-        local qualData = self.Qualifications[qual.qualification_name]
-        if qualData then
-            defaultCombo:AddChoice(qualData.display_name, qual.qualification_name)
-            choiceMap[qual.qualification_name] = choiceIndex
-            choiceIndex = choiceIndex + 1
-        end
-    end
-    
-    -- Set current default by choice ID
-    local currentDefault = self.LoadoutData.default or "none"
-    local choiceID = choiceMap[currentDefault]
-    if choiceID then
-        defaultCombo:ChooseOptionID(choiceID)
-    else
-        defaultCombo:ChooseOptionID(1)  -- Default to "Default Loadout"
-    end
-    
-    -- Save button
-    local saveBtn = vgui.Create("DButton", prefsPanel)
-    saveBtn:Dock(TOP)
-    saveBtn:SetTall(35)
-    saveBtn:SetText("")
-    saveBtn:DockMargin(10, 10, 10, 10)
-    saveBtn.Paint = function(self, w, h)
-        local col = Color(50, 180, 100, 220)
-        if self:IsHovered() then
-            col = Color(60, 200, 120, 255)
-        end
-        draw.RoundedBox(6, 0, 0, w, h, col)
-        draw.SimpleText("Save Preferences", "DermaDefaultBold", w/2, h/2, Color(255, 255, 255, 255), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
-    end
-    saveBtn.DoClick = function()
-        local _, selectedLoadout = defaultCombo:GetSelected()
-        local autoEquip = autoEquipCheck:GetChecked()
-        
-        -- Default to "none" if nothing selected
-        selectedLoadout = selectedLoadout or "none"
-        
-        net.Start("QualSystem_SetDefaultLoadout")
-        net.WriteString(selectedLoadout)
-        net.WriteBool(autoEquip)
-        net.SendToServer()
-        
-        chat.AddText(Color(100, 255, 150), "[Qualification System] ", Color(255, 255, 255), "Preferences saved!")
-    end
 end
 
 print("[Qualification System] Client-side loadout UI loaded!")
